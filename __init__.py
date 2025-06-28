@@ -11,9 +11,9 @@ DRY_RUN = False
 
 bl_info = {
     "name": "Scene exporter for colmap",
-    "description": "Generates a dataset for colmap by exporting blender camera poses and rendering scene.",
+    "description": "colmap_ :: Generates a dataset for colmap by exporting blender camera poses and rendering scene.",
     "author": "Ohayoyogi",
-    "version": (0, 1, 4),
+    "version": (0, 1, 5),
     "blender": (3, 6, 0),
     "location": "File/Export",
     "warning": "",
@@ -23,6 +23,7 @@ bl_info = {
 }
 
 print(f"HELLO {bl_info['version']}")
+print("YOYOYOYO")
 
 class BlenderExporterForColmap(bpy.types.Operator, ExportHelper):
     
@@ -44,7 +45,11 @@ class BlenderExporterForColmap(bpy.types.Operator, ExportHelper):
 
     def export_dataset(self, context, dirpath: Path, format: str):
         scene = context.scene
-        # Filter cameras that are in collections prefixed with "colmap_"
+        
+        # Get the render cameras property from scene
+        render_cameras = getattr(scene, 'sna_colmap_render_cameras', False)
+        
+        # Filter cameras that are in collections prefixed with "colmap_" or "layer_"
         scene_cameras = []
         for obj in scene.objects:
             if obj.type == "CAMERA":
@@ -66,6 +71,7 @@ class BlenderExporterForColmap(bpy.types.Operator, ExportHelper):
         images_dir = output_dir / 'images'
 
         output_dir.mkdir(parents=True, exist_ok=True)
+        images_dir.mkdir(parents=True, exist_ok=True)  # Always create images directory
 
         cameras = {}
         images = {}
@@ -121,23 +127,37 @@ class BlenderExporterForColmap(bpy.types.Operator, ExportHelper):
                 point3D_ids=[]
             )
 
-            # Render scene
-            bpy.context.scene.camera = cam
+            # Conditionally render based on DRY_RUN and RENDER_CAMERAS_PROP
             if DRY_RUN:
-                print(f"DRY_RUN: Would render camera '{cam.name_full}' from collections: {[col.name for col in cam.users_collection if col.name.startswith('colmap_')]}")
-            else:
+                print(f"DRY_RUN: Would render camera '{cam.name_full}'")
+            elif render_cameras:
+                # Render and save the image
+                bpy.context.scene.camera = cam
                 bpy.ops.render.render()
-                bpy.data.images['Render Result'].save_render(
-                    str(images_dir / filename))
+                bpy.data.images['Render Result'].save_render(str(images_dir / filename))
+                print(f"Rendered camera '{cam.name_full}' -> {filename}")
+            else:
+                # Skip rendering, just acknowledge processing
+                print(f"Skipping render for camera '{cam.name_full}', exporting pose only -> {filename}")
+
             yield 100.0 * idx / (len(scene_cameras) + 1)
 
-        if not DRY_RUN:
-            write_model(cameras, images, {}, str(output_dir), output_format)
-        else:
-            print(f"DRY_RUN: Would write model to {output_dir} with format {output_format}")
+        # Always write the model files
+        write_model(cameras, images, {}, str(output_dir), output_format)
+        print(f"Exported colmap dataset to {output_dir} with format {output_format}")
         yield 100.0
 
     def execute_(self, context, format):
+        print("=========================================")
+        RENDER_CAMERAS_PROP = getattr(context.scene, 'sna_colmap_render_cameras', False)
+        print(RENDER_CAMERAS_PROP)
+        if RENDER_CAMERAS_PROP:
+            print("Rendering cameras enabled - will render images")
+        else:
+            print("Rendering cameras disabled - will only export camera data")        
+        print("=========================================")
+
+
         dirpath = Path(self.directory)
         if not dirpath.is_dir():
             return {"WARNING", "Illegal directory was passed: " + self.directory}
@@ -156,6 +176,14 @@ class BlenderExporterForColmapBinary(BlenderExporterForColmap):
     bl_options = {"PRESET"}
 
     def execute(self, context):
+        # print("=========================================")
+        # RENDER_CAMERAS_PROP = bpy.context.scene.sna_colmap_render_cameras
+        # print(RENDER_CAMERAS_PROP)
+        # if RENDER_CAMERAS_PROP:
+        #     print("Rendering cameras enabled - will render images")
+        # else:
+        #     print("Rendering cameras disabled - will only export camera data")        
+        # print("=========================================")
         return super().execute_(context, '.bin')
 
 
